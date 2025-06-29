@@ -1,0 +1,26 @@
+{
+  "canisters": {
+    "Capstone-Project-backend": {
+      "candid": "src/Capstone-Project-backend/Capstone-Project-backend.did",
+      "package": "Capstone-Project-backend",
+      "type": "rust"
+    },
+    "Capstone-Project-frontend": {
+      "dependencies": [
+        "Capstone-Project-backend"
+      ],
+      "source": [
+        "src/Capstone-Project-frontend/assets"
+      ],
+      "type": "assets"
+    }
+  },
+  "defaults": {
+    "build": {
+      "args": "",
+      "packtool": ""
+    }
+  },
+  "output_env_file": ".env",
+  "version": 1
+}

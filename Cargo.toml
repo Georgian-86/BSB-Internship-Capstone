@@ -1,0 +1,5 @@
+[workspace]
+members = [
+    "src/Capstone-Project-backend"
+]
+resolver = "2"
