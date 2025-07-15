@@ -1,5 +1,69 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import './App.css';
+import { ICPAuthProvider, useICPAuth } from './ICPAuthContext';
+
+// Token System Types
+interface TokenReward {
+  id: number;
+  amount: number;
+  reason: string;
+  date: string;
+  courseId?: number;
+  lessonId?: number;
+}
+
+interface SwagItem {
+  id: number;
+  name: string;
+  description: string;
+  tokenCost: number;
+  image: string;
+  category: 'clothing' | 'accessories' | 'tech' | 'collectibles';
+  available: boolean;
+}
+
+// Enhanced Course Types
+interface Lesson {
+  id: number;
+  title: string;
+  duration: string;
+  type: 'video' | 'quiz' | 'exercise' | 'lab' | 'reading';
+  content?: string;
+  videoUrl?: string;
+  quiz?: {
+    title: string;
+    questions: Array<{
+      question: string;
+      answers: string[];
+      correctAnswer: number;
+      explanation?: string;
+    }>;
+  };
+  tokenReward: number;
+  difficulty: 'easy' | 'medium' | 'hard';
+}
+
+interface Chapter {
+  id: number;
+  title: string;
+  description: string;
+  lessons: Lesson[];
+  tokenReward: number;
+}
+
+interface Course {
+  id: number;
+  title: string;
+  description: string;
+  chapters: number;
+  duration: string;
+  level: 'Beginner' | 'Intermediate' | 'Advanced';
+  image: string;
+  chaptersList: Chapter[];
+  totalTokenReward: number;
+  prerequisites?: string[];
+  skills: string[];
+}
 
 const BlockchainSVG = () => (
   <svg className="blockchain-visual" viewBox="0 0 220 220" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -30,6 +94,7 @@ const BlockchainSVG = () => (
 
 // Navigation Component
 const Navigation: React.FC<{ currentPage: string; setCurrentPage: (page: string) => void }> = ({ currentPage, setCurrentPage }) => {
+  const { isAuthenticated, principal, login, logout, loading } = useICPAuth();
   return (
     <nav className="navigation">
       <div className="nav-container">
@@ -61,18 +126,34 @@ const Navigation: React.FC<{ currentPage: string; setCurrentPage: (page: string)
           >
             Resources
           </button>
-          <button 
-            className={`nav-link ${currentPage === 'profile' ? 'active' : ''}`}
-            onClick={() => setCurrentPage('profile')}
-          >
-            Profile
-          </button>
-          <button 
-            className={`nav-link admin-link ${currentPage === 'admin' ? 'active' : ''}`}
-            onClick={() => setCurrentPage('admin')}
-          >
-            Admin
-          </button>
+          {isAuthenticated && (
+            <button 
+              className={`nav-link ${currentPage === 'profile' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('profile')}
+            >
+              Profile
+            </button>
+          )}
+          {isAuthenticated && (
+            <button 
+              className={`nav-link admin-link ${currentPage === 'admin' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('admin')}
+            >
+              Admin
+            </button>
+          )}
+          <div className="nav-auth">
+            {loading ? (
+              <span>Loading...</span>
+            ) : isAuthenticated ? (
+              <>
+                <span className="principal">{principal?.slice(0, 8)}...</span>
+                <button className="nav-link logout" onClick={logout}>Logout</button>
+              </>
+            ) : (
+              <button className="nav-link login" onClick={login}>Login with Internet Identity</button>
+            )}
+          </div>
         </div>
       </div>
     </nav>
@@ -220,48 +301,219 @@ const LandingPage: React.FC = () => {
   );
 };
 
+// Define props interfaces above usage
+interface CoursesPageProps {
+  userTokens: number;
+  setUserTokens: React.Dispatch<React.SetStateAction<number>>;
+  tokenHistory: TokenReward[];
+  setTokenHistory: React.Dispatch<React.SetStateAction<TokenReward[]>>;
+  selectedCourse: number | null;
+  setSelectedCourse: React.Dispatch<React.SetStateAction<number | null>>;
+}
+
+interface ProfilePageProps {
+  userTokens: number;
+}
+
 // Courses Page Component
-const CoursesPage: React.FC = () => {
-  const [selectedCourse, setSelectedCourse] = useState<number | null>(null);
+const CoursesPage: React.FC<CoursesPageProps> = ({ userTokens, setUserTokens, tokenHistory, setTokenHistory, selectedCourse, setSelectedCourse }) => {
+  const [showTokenStore, setShowTokenStore] = useState(false);
+  const [showTokenHistory, setShowTokenHistory] = useState(false);
   
-  const courses = [
+  // Swag Store Items
+  const swagItems: SwagItem[] = [
+    {
+      id: 1,
+      name: "BlockseBlock T-Shirt",
+      description: "Premium cotton t-shirt with our logo",
+      tokenCost: 500,
+      image: "👕",
+      category: "clothing",
+      available: true
+    },
+    {
+      id: 2,
+      name: "Blockchain Hoodie",
+      description: "Warm hoodie with blockchain design",
+      tokenCost: 800,
+      image: "🧥",
+      category: "clothing",
+      available: true
+    },
+    {
+      id: 3,
+      name: "Crypto Coffee Mug",
+      description: "Ceramic mug with crypto-themed design",
+      tokenCost: 200,
+      image: "☕",
+      category: "accessories",
+      available: true
+    },
+    {
+      id: 4,
+      name: "Hardware Wallet",
+      description: "Ledger Nano S for secure crypto storage",
+      tokenCost: 2000,
+      image: "💳",
+      category: "tech",
+      available: true
+    },
+    {
+      id: 5,
+      name: "Blockchain Stickers Pack",
+      description: "Set of 10 high-quality vinyl stickers",
+      tokenCost: 100,
+      image: "🏷️",
+      category: "collectibles",
+      available: true
+    },
+    {
+      id: 6,
+      name: "Crypto Keychain",
+      description: "Metal keychain with blockchain symbol",
+      tokenCost: 150,
+      image: "🔑",
+      category: "accessories",
+      available: true
+    }
+  ];
+
+  const courses: Course[] = [
     {
       id: 1,
       title: "Blockchain Fundamentals",
-      description: "Learn the basics of blockchain technology, consensus mechanisms, and cryptographic principles.",
+      description: "Master the core concepts of blockchain technology, from cryptographic foundations to consensus mechanisms. Perfect for beginners starting their blockchain journey.",
       chapters: 8,
       duration: "6 weeks",
       level: "Beginner",
       image: "🔗",
+      totalTokenReward: 1200,
+      prerequisites: [],
+      skills: ["Blockchain Basics", "Cryptography", "Consensus Mechanisms", "Digital Signatures"],
       chaptersList: [
         {
           id: 1,
           title: "Introduction to Blockchain",
+          description: "Understanding the revolutionary technology that powers cryptocurrencies",
+          tokenReward: 150,
           lessons: [
-            { id: 1, title: "What is Blockchain?", duration: "15 min", type: "video" },
-            { id: 2, title: "History of Blockchain", duration: "20 min", type: "video" },
-            { id: 3, title: "Blockchain vs Traditional Systems", duration: "25 min", type: "video" },
-            { id: 4, title: "Quiz: Blockchain Basics", duration: "10 min", type: "quiz" }
-          ]
+            {
+              id: 1,
+              title: "What is Blockchain?",
+              duration: "15 min",
+              type: "reading",
+              content: `A blockchain is a distributed, decentralized, public ledger that exists across a network. It's most commonly associated with cryptocurrencies like Bitcoin, but it has many other potential uses.
+
+Key Concepts:
+• Distributed Ledger: The ledger is shared across multiple computers
+• Decentralized: No single entity controls the network
+• Immutable: Once data is recorded, it cannot be altered
+• Transparent: All transactions are visible to network participants
+
+Blockchain technology was first introduced in 2008 by Satoshi Nakamoto as the underlying technology for Bitcoin. Since then, it has evolved into a platform for building decentralized applications.`,
+              tokenReward: 25,
+              difficulty: "easy"
         },
         {
           id: 2,
-          title: "Cryptographic Foundations",
-          lessons: [
-            { id: 5, title: "Hash Functions", duration: "30 min", type: "video" },
-            { id: 6, title: "Public Key Cryptography", duration: "35 min", type: "video" },
-            { id: 7, title: "Digital Signatures", duration: "25 min", type: "video" },
-            { id: 8, title: "Practical Exercise: Creating Keys", duration: "45 min", type: "exercise" }
-          ]
+              title: "History of Blockchain",
+              duration: "20 min",
+              type: "reading",
+              content: `The history of blockchain technology is fascinating and spans several decades:
+
+1991-2008: Early Foundations
+• Stuart Haber and W. Scott Stornetta created the first blockchain-like system
+• They developed a cryptographically secured chain of blocks to prevent document tampering
+
+2008: Bitcoin Whitepaper
+• Satoshi Nakamoto published "Bitcoin: A Peer-to-Peer Electronic Cash System"
+• Introduced the first practical implementation of blockchain technology
+
+2009: Bitcoin Genesis Block
+• The first Bitcoin block was mined on January 3, 2009
+• Embedded with the message: "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks"
+
+2015: Ethereum Launch
+• Vitalik Buterin launched Ethereum, introducing smart contracts
+• Opened the door for decentralized applications (DApps)`,
+              tokenReward: 30,
+              difficulty: "easy"
         },
         {
           id: 3,
-          title: "Consensus Mechanisms",
-          lessons: [
-            { id: 9, title: "Proof of Work", duration: "40 min", type: "video" },
-            { id: 10, title: "Proof of Stake", duration: "35 min", type: "video" },
-            { id: 11, title: "Other Consensus Algorithms", duration: "30 min", type: "video" },
-            { id: 12, title: "Quiz: Consensus Mechanisms", duration: "15 min", type: "quiz" }
+              title: "Blockchain vs Traditional Systems",
+              duration: "25 min",
+              type: "reading",
+              content: `Traditional centralized systems vs. decentralized blockchain networks:
+
+Centralized Systems:
+• Single point of control
+• Single point of failure
+• Requires trust in central authority
+• Faster transaction processing
+• Lower energy consumption
+
+Blockchain Systems:
+• Distributed control
+• No single point of failure
+• Trustless operation
+• Slower transaction processing
+• Higher energy consumption (for PoW)
+
+Use Cases:
+• Banking: Traditional for speed, Blockchain for transparency
+• Supply Chain: Blockchain for traceability
+• Voting: Blockchain for immutability
+• Identity: Blockchain for self-sovereignty`,
+              tokenReward: 35,
+              difficulty: "medium"
+            },
+            {
+              id: 4,
+              title: "Quiz: Blockchain Basics",
+              duration: "10 min",
+              type: "quiz",
+              tokenReward: 60,
+              difficulty: "easy",
+              quiz: {
+                title: "Blockchain Fundamentals Quiz",
+                questions: [
+                  {
+                    question: "What is the primary characteristic of a blockchain?",
+                    answers: [
+                      "It's controlled by a single entity",
+                      "It's a distributed, decentralized ledger",
+                      "It's faster than traditional databases",
+                      "It's free to use"
+                    ],
+                    correctAnswer: 1,
+                    explanation: "A blockchain is fundamentally a distributed, decentralized ledger that exists across a network of computers."
+                  },
+                  {
+                    question: "Who created the Bitcoin whitepaper?",
+                    answers: [
+                      "Vitalik Buterin",
+                      "Satoshi Nakamoto",
+                      "Hal Finney",
+                      "Nick Szabo"
+                    ],
+                    correctAnswer: 1,
+                    explanation: "Satoshi Nakamoto published the Bitcoin whitepaper in 2008, introducing the first practical blockchain implementation."
+                  },
+                  {
+                    question: "What happens once data is recorded on a blockchain?",
+                    answers: [
+                      "It can be easily modified",
+                      "It becomes immutable",
+                      "It gets deleted after a certain time",
+                      "It's only visible to the creator"
+                    ],
+                    correctAnswer: 1,
+                    explanation: "One of the key features of blockchain is immutability - once data is recorded, it cannot be altered."
+                  }
+                ]
+              }
+            }
           ]
         }
       ]
@@ -269,178 +521,453 @@ const CoursesPage: React.FC = () => {
     {
       id: 2,
       title: "Smart Contract Development",
-      description: "Master Solidity programming and build decentralized applications on Ethereum.",
+      description: "Learn Solidity programming and build decentralized applications on Ethereum. Master the art of creating secure, efficient smart contracts.",
       chapters: 12,
       duration: "8 weeks",
       level: "Intermediate",
       image: "📜",
+      totalTokenReward: 1800,
+      prerequisites: ["Blockchain Fundamentals"],
+      skills: ["Solidity", "Smart Contracts", "Ethereum", "DApp Development"],
       chaptersList: [
         {
           id: 1,
           title: "Introduction to Smart Contracts",
+          description: "Understanding the foundation of programmable blockchain applications",
+          tokenReward: 200,
           lessons: [
-            { id: 1, title: "What are Smart Contracts?", duration: "20 min", type: "video" },
-            { id: 2, title: "Ethereum Virtual Machine", duration: "25 min", type: "video" },
-            { id: 3, title: "Gas and Transaction Costs", duration: "30 min", type: "video" },
-            { id: 4, title: "Quiz: Smart Contract Basics", duration: "10 min", type: "quiz" }
-          ]
+            {
+              id: 1,
+              title: "What are Smart Contracts?",
+              duration: "20 min",
+              type: "reading",
+              content: `Smart contracts are self-executing contracts with the terms of the agreement directly written into code.
+
+Definition:
+A smart contract is a computer program that automatically executes when predetermined conditions are met.
+
+Key Characteristics:
+• Self-executing: No third party needed
+• Immutable: Code cannot be changed once deployed
+• Transparent: All code is visible on blockchain
+• Deterministic: Same inputs always produce same outputs
+
+Real-World Examples:
+• Insurance: Automatic payout when conditions are met
+• Supply Chain: Automatic payment when goods are delivered
+• Voting: Automatic tallying of votes
+• Gaming: Automatic distribution of rewards
+
+Smart Contract Lifecycle:
+1. Development: Write contract code
+2. Compilation: Convert to bytecode
+3. Deployment: Upload to blockchain
+4. Execution: Contract runs automatically`,
+              tokenReward: 30,
+              difficulty: "easy"
         },
         {
           id: 2,
-          title: "Solidity Fundamentals",
-          lessons: [
-            { id: 5, title: "Solidity Syntax", duration: "45 min", type: "video" },
-            { id: 6, title: "Variables and Data Types", duration: "40 min", type: "video" },
-            { id: 7, title: "Functions and Modifiers", duration: "50 min", type: "video" },
-            { id: 8, title: "Lab: Your First Smart Contract", duration: "60 min", type: "lab" }
+              title: "Ethereum Virtual Machine",
+              duration: "25 min",
+              type: "reading",
+              content: `The Ethereum Virtual Machine (EVM) is the runtime environment for smart contracts on Ethereum.
+
+EVM Architecture:
+• Stack-based virtual machine
+• 256-bit word size
+• Turing complete
+• Gas-based execution model
+
+Key Concepts:
+• Bytecode: Compiled smart contract code
+• Gas: Unit of computational work
+• Opcodes: Low-level instructions
+• Memory: Temporary storage during execution
+
+Gas System:
+• Every operation costs gas
+• Gas price determines transaction fee
+• Gas limit prevents infinite loops
+• Out of gas = transaction fails
+
+Example Gas Costs:
+• ADD: 3 gas
+• MUL: 5 gas
+• SSTORE: 20,000 gas (first time)
+• SLOAD: 100 gas`,
+              tokenReward: 35,
+              difficulty: "medium"
+            },
+            {
+              id: 3,
+              title: "Gas and Transaction Costs",
+              duration: "30 min",
+              type: "reading",
+              content: `Understanding gas is crucial for efficient smart contract development and deployment.
+
+Gas Calculation:
+Total Cost = Gas Used × Gas Price
+
+Gas Price Options:
+• Standard: Normal network conditions
+• Fast: Higher priority, higher cost
+• Instant: Maximum priority, highest cost
+
+Factors Affecting Gas:
+• Contract complexity
+• Storage operations
+• Computational operations
+• Network congestion
+
+Gas Optimization Techniques:
+• Use events instead of storage for logs
+• Batch operations when possible
+• Avoid unnecessary loops
+• Use appropriate data types
+
+Example:
+Simple transfer: 21,000 gas
+Smart contract call: 50,000+ gas
+Contract deployment: 500,000+ gas`,
+              tokenReward: 40,
+              difficulty: "medium"
+            },
+            {
+              id: 4,
+              title: "Quiz: Smart Contract Basics",
+              duration: "10 min",
+              type: "quiz",
+              tokenReward: 95,
+              difficulty: "easy",
+              quiz: {
+                title: "Smart Contract Fundamentals Quiz",
+                questions: [
+                  {
+                    question: "What is the primary characteristic of smart contracts?",
+                    answers: [
+                      "They require human intervention",
+                      "They are self-executing",
+                      "They can be modified after deployment",
+                      "They are free to deploy"
+                    ],
+                    correctAnswer: 1,
+                    explanation: "Smart contracts are self-executing programs that automatically execute when predetermined conditions are met."
+                  },
+                  {
+                    question: "What does EVM stand for?",
+                    answers: [
+                      "Ethereum Virtual Machine",
+                      "Electronic Value Mechanism",
+                      "Ethereum Verification Method",
+                      "Encrypted Virtual Memory"
+                    ],
+                    correctAnswer: 0,
+                    explanation: "EVM stands for Ethereum Virtual Machine, the runtime environment for smart contracts."
+                  },
+                  {
+                    question: "How is transaction cost calculated in Ethereum?",
+                    answers: [
+                      "Gas Used × Gas Price",
+                      "Contract Size × Network Fee",
+                      "Block Number × Difficulty",
+                      "Transaction Value × Percentage"
+                    ],
+                    correctAnswer: 0,
+                    explanation: "Transaction cost = Gas Used × Gas Price, where gas is the unit of computational work."
+                  }
+                ]
+              }
+            }
           ]
         }
       ]
     },
     {
       id: 3,
-      title: "DeFi Protocols",
-      description: "Explore decentralized finance protocols, yield farming, and liquidity pools.",
-      chapters: 10,
-      duration: "7 weeks",
+      title: "Zero Knowledge Proofs",
+      description: "Dive into the world of privacy-preserving cryptography and learn how ZKPs are revolutionizing blockchain scalability and privacy.",
+      chapters: 7,
+      duration: "5 weeks",
       level: "Advanced",
-      image: "💰",
+      image: "🕵️‍♂️",
+      totalTokenReward: 1400,
+      prerequisites: ["Blockchain Fundamentals", "Cryptographic Foundations"],
+      skills: ["ZKP Theory", "zk-SNARKs", "zk-STARKs", "Privacy Protocols"],
       chaptersList: [
         {
           id: 1,
-          title: "Introduction to DeFi",
+          title: "Introduction to ZKPs",
+          description: "What are Zero Knowledge Proofs and why do they matter?",
+          tokenReward: 200,
           lessons: [
-            { id: 1, title: "What is DeFi?", duration: "25 min", type: "video" },
-            { id: 2, title: "DeFi vs Traditional Finance", duration: "30 min", type: "video" },
-            { id: 3, title: "DeFi Ecosystem Overview", duration: "35 min", type: "video" },
-            { id: 4, title: "Quiz: DeFi Fundamentals", duration: "15 min", type: "quiz" }
-          ]
+            {
+              id: 1,
+              title: "ZKP Basics",
+              duration: "20 min",
+              type: "reading",
+              content: `A Zero Knowledge Proof (ZKP) allows one party to prove to another that a statement is true, without revealing any information beyond the validity of the statement.\n\nApplications: Privacy coins, identity, voting, and more.`,
+              tokenReward: 40,
+              difficulty: "medium"
         },
         {
           id: 2,
-          title: "Lending and Borrowing",
-          lessons: [
-            { id: 5, title: "Compound Protocol", duration: "45 min", type: "video" },
-            { id: 6, title: "Aave Protocol", duration: "50 min", type: "video" },
-            { id: 7, title: "Yield Farming Strategies", duration: "60 min", type: "video" },
-            { id: 8, title: "Lab: DeFi Lending", duration: "90 min", type: "lab" }
+              title: "Interactive vs Non-Interactive ZKPs",
+              duration: "15 min",
+              type: "reading",
+              content: `Learn the difference between interactive and non-interactive ZKPs, and why non-interactive proofs (like zk-SNARKs) are so important for blockchains.`,
+              tokenReward: 30,
+              difficulty: "medium"
+            },
+            {
+              id: 3,
+              title: "Quiz: ZKP Fundamentals",
+              duration: "10 min",
+              type: "quiz",
+              tokenReward: 60,
+              difficulty: "medium",
+              quiz: {
+                title: "ZKP Quiz",
+                questions: [
+                  {
+                    question: "What is the main benefit of a ZKP?",
+                    answers: ["Faster transactions", "Privacy without revealing data", "Lower fees", "More validators"],
+                    correctAnswer: 1,
+                    explanation: "ZKPs allow privacy without revealing underlying data."
+                  }
+                ]
+              }
+            }
           ]
         }
       ]
     },
     {
       id: 4,
-      title: "Web3 Development",
-      description: "Build full-stack Web3 applications using modern frameworks and tools.",
-      chapters: 15,
-      duration: "10 weeks",
-      level: "Advanced",
-      image: "🌐",
+      title: "Blockchain for Business",
+      description: "Explore real-world enterprise blockchain use cases, from supply chain to finance, and how businesses are adopting DLT.",
+      chapters: 6,
+      duration: "4 weeks",
+      level: "Intermediate",
+      image: "��",
+      totalTokenReward: 1000,
+      prerequisites: ["Blockchain Fundamentals"],
+      skills: ["DLT", "Enterprise Integration", "Smart Contracts", "Consortium Chains"],
       chaptersList: [
         {
           id: 1,
-          title: "Web3 Architecture",
+          title: "Enterprise Blockchain Overview",
+          description: "How businesses use blockchain for transparency and efficiency.",
+          tokenReward: 150,
           lessons: [
-            { id: 1, title: "Web3 Stack Overview", duration: "30 min", type: "video" },
-            { id: 2, title: "Frontend Integration", duration: "40 min", type: "video" },
-            { id: 3, title: "Wallet Integration", duration: "45 min", type: "video" },
-            { id: 4, title: "Quiz: Web3 Basics", duration: "15 min", type: "quiz" }
-          ]
+            {
+              id: 1,
+              title: "DLT in Supply Chain",
+              duration: "20 min",
+              type: "reading",
+              content: `Distributed Ledger Technology (DLT) enables transparent, tamper-proof supply chains. Learn about real-world deployments by IBM, Maersk, and others.`,
+              tokenReward: 30,
+              difficulty: "easy"
         },
         {
           id: 2,
-          title: "React and Web3",
-          lessons: [
-            { id: 5, title: "Web3.js Integration", duration: "50 min", type: "video" },
-            { id: 6, title: "Ethers.js with React", duration: "55 min", type: "video" },
-            { id: 7, title: "State Management", duration: "60 min", type: "video" },
-            { id: 8, title: "Lab: Building a DApp", duration: "120 min", type: "lab" }
+              title: "Quiz: Enterprise Blockchain",
+              duration: "10 min",
+              type: "quiz",
+              tokenReward: 40,
+              difficulty: "easy",
+              quiz: {
+                title: "Enterprise Blockchain Quiz",
+                questions: [
+                  {
+                    question: "Which industry is a major adopter of blockchain for tracking goods?",
+                    answers: ["Healthcare", "Supply Chain", "Gaming", "Education"],
+                    correctAnswer: 1,
+                    explanation: "Supply chain is a leading use case for enterprise blockchain."
+                  }
+                ]
+              }
+            }
           ]
         }
       ]
     },
     {
       id: 5,
-      title: "NFT Development",
-      description: "Create, deploy, and trade non-fungible tokens with advanced features.",
-      chapters: 6,
-      duration: "4 weeks",
+      title: "Crypto Trading & DeFi",
+      description: "Master the essentials of crypto trading, DeFi protocols, yield farming, and risk management in decentralized finance.",
+      chapters: 8,
+      duration: "6 weeks",
       level: "Intermediate",
-      image: "🎨",
+      image: "📈",
+      totalTokenReward: 1200,
+      prerequisites: ["Blockchain Fundamentals"],
+      skills: ["DEXs", "Yield Farming", "Liquidity Pools", "Risk Management"],
       chaptersList: [
         {
           id: 1,
-          title: "NFT Standards",
+          title: "Intro to DeFi Trading",
+          description: "How to trade safely and profitably on decentralized exchanges.",
+          tokenReward: 200,
           lessons: [
-            { id: 1, title: "ERC-721 Standard", duration: "35 min", type: "video" },
-            { id: 2, title: "ERC-1155 Standard", duration: "30 min", type: "video" },
-            { id: 3, title: "Metadata Standards", duration: "25 min", type: "video" },
-            { id: 4, title: "Quiz: NFT Standards", duration: "10 min", type: "quiz" }
-          ]
+            {
+              id: 1,
+              title: "What is a DEX?",
+              duration: "15 min",
+              type: "reading",
+              content: `A Decentralized Exchange (DEX) allows peer-to-peer trading of crypto assets without intermediaries. Learn about Uniswap, SushiSwap, and more.`,
+              tokenReward: 30,
+              difficulty: "easy"
         },
         {
           id: 2,
-          title: "NFT Marketplace",
-          lessons: [
-            { id: 5, title: "Building an NFT Contract", duration: "60 min", type: "video" },
-            { id: 6, title: "Marketplace Features", duration: "45 min", type: "video" },
-            { id: 7, title: "Royalty Systems", duration: "40 min", type: "video" },
-            { id: 8, title: "Lab: NFT Marketplace", duration: "150 min", type: "lab" }
+              title: "Quiz: DEX Basics",
+              duration: "10 min",
+              type: "quiz",
+              tokenReward: 40,
+              difficulty: "easy",
+              quiz: {
+                title: "DEX Quiz",
+                questions: [
+                  {
+                    question: "What is the main advantage of a DEX?",
+                    answers: ["Centralized control", "No intermediaries", "Faster KYC", "Higher fees"],
+                    correctAnswer: 1,
+                    explanation: "DEXs allow trading without intermediaries."
+                  }
+                ]
+              }
+            }
           ]
         }
       ]
     },
     {
       id: 6,
-      title: "Blockchain Security",
-      description: "Learn security best practices and audit smart contracts for vulnerabilities.",
-      chapters: 9,
-      duration: "6 weeks",
-      level: "Advanced",
-      image: "🔒",
+      title: "Web3 Social & DAOs",
+      description: "Discover the future of decentralized social networks, DAOs, and on-chain governance for communities.",
+      chapters: 5,
+      duration: "3 weeks",
+      level: "Beginner",
+      image: "🤝",
+      totalTokenReward: 800,
+      prerequisites: ["Blockchain Fundamentals"],
+      skills: ["DAOs", "On-chain Governance", "Web3 Social", "Token Voting"],
       chaptersList: [
         {
           id: 1,
-          title: "Security Fundamentals",
+          title: "Intro to DAOs",
+          description: "What are Decentralized Autonomous Organizations and how do they work?",
+          tokenReward: 120,
           lessons: [
-            { id: 1, title: "Common Vulnerabilities", duration: "40 min", type: "video" },
-            { id: 2, title: "Reentrancy Attacks", duration: "45 min", type: "video" },
-            { id: 3, title: "Integer Overflow", duration: "35 min", type: "video" },
-            { id: 4, title: "Quiz: Security Basics", duration: "15 min", type: "quiz" }
-          ]
+            {
+              id: 1,
+              title: "DAO Basics",
+              duration: "15 min",
+              type: "reading",
+              content: `DAOs are organizations governed by code and token holders, not centralized management. Learn about MakerDAO, ENS DAO, and more.`,
+              tokenReward: 30,
+              difficulty: "easy"
         },
         {
           id: 2,
-          title: "Auditing Techniques",
-          lessons: [
-            { id: 5, title: "Static Analysis", duration: "50 min", type: "video" },
-            { id: 6, title: "Dynamic Testing", duration: "55 min", type: "video" },
-            { id: 7, title: "Formal Verification", duration: "60 min", type: "video" },
-            { id: 8, title: "Lab: Security Audit", duration: "180 min", type: "lab" }
+              title: "Quiz: DAO Fundamentals",
+              duration: "10 min",
+              type: "quiz",
+              tokenReward: 30,
+              difficulty: "easy",
+              quiz: {
+                title: "DAO Quiz",
+                questions: [
+                  {
+                    question: "What is a DAO?",
+                    answers: ["A centralized company", "A decentralized organization run by code", "A type of NFT", "A blockchain explorer"],
+                    correctAnswer: 1,
+                    explanation: "DAOs are decentralized organizations governed by code and token holders."
+                  }
+                ]
+              }
+            }
           ]
         }
       ]
     }
   ];
 
+  const handleRedeemItem = (item: SwagItem) => {
+    if (userTokens >= item.tokenCost) {
+      setUserTokens((prev: number) => prev - item.tokenCost);
+      alert(`🎉 Successfully redeemed ${item.name}! You'll receive it within 5-7 business days.`);
+    }
+  };
+
+  const addTokenReward = (amount: number, reason: string, courseId?: number, lessonId?: number) => {
+    const newReward: TokenReward = {
+      id: Date.now(),
+      amount,
+      reason,
+      date: new Date().toLocaleDateString(),
+      courseId,
+      lessonId
+    };
+    
+    setUserTokens((prev: number) => prev + amount);
+    setTokenHistory((prev: TokenReward[]) => [newReward, ...prev]);
+  };
+
   if (selectedCourse) {
     const course = courses.find(c => c.id === selectedCourse);
     if (!course) return <div>Course not found</div>;
     
-    return <CourseDetailPage course={course} onBack={() => setSelectedCourse(null)} />;
+    return (
+      <CourseDetailPage 
+        course={course} 
+        onBack={() => setSelectedCourse(null)}
+        onTokenReward={addTokenReward}
+      />
+    );
   }
 
   return (
     <div className="page-container">
       <div className="container">
+        <div className="courses-header">
+          <div className="courses-title-section">
         <h1 className="page-title">Courses</h1>
         <p className="page-subtitle">Master blockchain and Web3 technologies with our comprehensive course catalog</p>
+          </div>
+          
+          <div className="token-section">
+            <div className="token-display">
+              <span className="token-icon">🪙</span>
+              <span className="token-amount">{userTokens} Tokens</span>
+            </div>
+            <div className="token-actions">
+              <button 
+                className="token-btn history-btn"
+                onClick={() => setShowTokenHistory(true)}
+              >
+                📊 History
+              </button>
+              <button 
+                className="token-btn store-btn"
+                onClick={() => setShowTokenStore(true)}
+              >
+                🛍️ Store
+              </button>
+            </div>
+          </div>
+        </div>
         
         <div className="courses-grid">
           {courses.map(course => (
             <div key={course.id} className="course-card">
               <div className="course-image">
                 <span className="course-icon">{course.image}</span>
+                <div className="course-token-reward">
+                  <span className="token-icon">🪙</span>
+                  <span>{course.totalTokenReward}</span>
+                </div>
               </div>
               <div className="course-content">
                 <h3>{course.title}</h3>
@@ -449,7 +976,26 @@ const CoursesPage: React.FC = () => {
                   <span className="meta-item">📚 {course.chapters} Chapters</span>
                   <span className="meta-item">⏱️ {course.duration}</span>
                   <span className="meta-item">📊 {course.level}</span>
+                  <span className="meta-item">🪙 {course.totalTokenReward} Tokens</span>
                 </div>
+                <div className="course-skills">
+                  <h4>Skills you'll learn:</h4>
+                  <div className="skills-tags">
+                    {course.skills.map((skill, index) => (
+                      <span key={index} className="skill-tag">{skill}</span>
+                    ))}
+                  </div>
+                </div>
+                {course.prerequisites && course.prerequisites.length > 0 && (
+                  <div className="course-prerequisites">
+                    <h4>Prerequisites:</h4>
+                    <div className="prerequisites-list">
+                      {course.prerequisites.map((prereq, index) => (
+                        <span key={index} className="prerequisite-item">• {prereq}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <button 
                   className="course-btn"
                   onClick={() => setSelectedCourse(course.id)}
@@ -461,295 +1007,280 @@ const CoursesPage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {showTokenStore && (
+        <TokenStore
+          userTokens={userTokens}
+          onRedeem={handleRedeemItem}
+          onClose={() => setShowTokenStore(false)}
+          swagItems={swagItems}
+        />
+      )}
+
+      {showTokenHistory && (
+        <TokenHistory
+          tokenHistory={tokenHistory}
+          onClose={() => setShowTokenHistory(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+// Confetti Animation Component
+const Confetti: React.FC<{ trigger: boolean }> = ({ trigger }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (trigger && ref.current) {
+      ref.current.classList.add('confetti-animate');
+      setTimeout(() => {
+        ref.current && ref.current.classList.remove('confetti-animate');
+      }, 1200);
+    }
+  }, [trigger]);
+  return <div ref={ref} className="confetti" />;
+};
+
+// Add TokenChestModal Component
+const TokenChestModal: React.FC<{ open: boolean; amount: number; onClose: () => void }> = ({ open, amount, onClose }) => {
+  React.useEffect(() => {
+    if (open) {
+      const timer = setTimeout(onClose, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [open, onClose]);
+  if (!open) return null;
+  return (
+    <div className="token-chest-modal-overlay">
+      <div className="token-chest-modal">
+        <div className="chest-emoji">🪙<span className="chest">🧰</span></div>
+        <div className="chest-message">Completed!<br/>Token Reward</div>
+        <div className="chest-amount">+{amount} Tokens</div>
+        <button className="chest-close-btn" onClick={onClose}>×</button>
+      </div>
     </div>
   );
 };
 
 // Course Detail Page Component
-const CourseDetailPage: React.FC<{ course: any; onBack: () => void }> = ({ course, onBack }) => {
-  const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
-  const [selectedLesson, setSelectedLesson] = useState<any>(null);
+const CourseDetailPage: React.FC<{ course: Course; onBack: () => void; onTokenReward: (amount: number, reason: string, courseId?: number, lessonId?: number) => void }> = ({ course, onBack, onTokenReward }) => {
+  const [selectedChapter, setSelectedChapter] = useState<number | null>(course.chaptersList[0]?.id || null);
+  const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(course.chaptersList[0]?.lessons[0] || null);
   const [completedLessons, setCompletedLessons] = useState<Set<number>>(new Set());
   const [quizScores, setQuizScores] = useState<{[key: number]: number}>({});
-  const [activeTab, setActiveTab] = useState<'lessons' | 'forum' | 'certificate'>('lessons');
+  const [activeTab, setActiveTab] = useState<'overview' | 'lessons' | 'forum' | 'certificate'>('overview');
   const [courseCompleted, setCourseCompleted] = useState(false);
   const [showCertificate, setShowCertificate] = useState(false);
+  const [showChest, setShowChest] = useState(false);
+  const [chestAmount, setChestAmount] = useState(0);
 
   const handleLessonComplete = (lessonId: number) => {
-    setCompletedLessons(prev => new Set(Array.from(prev).concat(lessonId)));
-    
+    if (!completedLessons.has(lessonId)) {
+      setCompletedLessons(prev => {
+        const updated = new Set(prev).add(lessonId);
+        return updated;
+      });
+      // Award tokens for lesson completion
+      const lesson = course.chaptersList
+        .flatMap((chapter: Chapter) => chapter.lessons)
+        .find((l: Lesson) => l.id === lessonId);
+      if (lesson) {
+        onTokenReward(
+          lesson.tokenReward,
+          `Completed lesson: ${lesson.title}`,
+          course.id,
+          lessonId
+        );
+        setChestAmount(lesson.tokenReward);
+        setShowChest(true);
+      }
+    }
     // Check if course is completed
-    const totalLessons = course.chaptersList.reduce((acc: number, chapter: any) => acc + chapter.lessons.length, 0);
-    const newCompletedLessons = new Set(Array.from(completedLessons).concat(lessonId));
+    const totalLessons = course.chaptersList.reduce((acc, chapter) => acc + chapter.lessons.length, 0);
+    const newCompletedLessons = new Set(completedLessons).add(lessonId);
     if (newCompletedLessons.size === totalLessons) {
       setCourseCompleted(true);
+      onTokenReward(
+        course.totalTokenReward * 0.1,
+        `Course completed: ${course.title}`,
+        course.id
+      );
     }
   };
 
   const handleQuizComplete = (lessonId: number, score: number) => {
     setQuizScores(prev => ({ ...prev, [lessonId]: score }));
-    handleLessonComplete(lessonId);
-  };
-
-  const getProgressPercentage = () => {
-    const totalLessons = course.chaptersList.reduce((acc: number, chapter: any) => acc + chapter.lessons.length, 0);
-    return Math.round((completedLessons.size / totalLessons) * 100);
-  };
-
-  const renderLessonContent = () => {
-    if (!selectedLesson) return null;
-
-    switch (selectedLesson.type) {
-      case 'video':
-        return (
-          <VideoPlayer 
-            videoUrl={selectedLesson.videoUrl || "https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4"}
-            onComplete={() => handleLessonComplete(selectedLesson.id)}
-          />
+    if (!completedLessons.has(lessonId)) {
+      setCompletedLessons(prev => {
+        const updated = new Set(prev).add(lessonId);
+        return updated;
+      });
+      // Always award base tokens for quiz completion
+      const lesson = course.chaptersList
+        .flatMap((chapter: Chapter) => chapter.lessons)
+        .find((l: Lesson) => l.id === lessonId);
+      if (lesson) {
+        onTokenReward(
+          lesson.tokenReward,
+          `Completed quiz: ${lesson.title}`,
+          course.id,
+          lessonId
         );
-      case 'quiz':
-        return (
-          <Quiz 
-            quiz={selectedLesson.quiz || {
-              title: "Chapter Quiz",
-              questions: [
-                {
-                  question: "What is a blockchain?",
-                  answers: [
-                    "A type of cryptocurrency",
-                    "A distributed ledger technology",
-                    "A programming language",
-                    "A database management system"
-                  ],
-                  correctAnswer: 1
-                },
-                {
-                  question: "Which consensus mechanism does Bitcoin use?",
-                  answers: [
-                    "Proof of Stake",
-                    "Proof of Work",
-                    "Delegated Proof of Stake",
-                    "Proof of Authority"
-                  ],
-                  correctAnswer: 1
-                }
-              ]
-            }}
-            onComplete={(score) => handleQuizComplete(selectedLesson.id, score)}
-          />
-        );
-      default:
-        return (
-          <div className="lesson-content">
-            <h3>{selectedLesson.title}</h3>
-            <p>{selectedLesson.content || "Lesson content will be displayed here."}</p>
-            <button 
-              className="complete-lesson-btn"
-              onClick={() => handleLessonComplete(selectedLesson.id)}
-            >
-              Mark as Complete
-            </button>
-          </div>
+        setChestAmount(lesson.tokenReward);
+        setShowChest(true);
+        if (score >= 80) {
+          const bonusTokens = Math.floor(lesson.tokenReward * 0.5);
+          onTokenReward(
+            bonusTokens,
+            `High quiz score (${score}%): ${lesson.title}`,
+            course.id,
+            lessonId
+          );
+          setTimeout(() => {
+            setChestAmount(bonusTokens);
+            setShowChest(true);
+          }, 1600);
+        }
+      }
+    }
+    // Check if course is completed
+    const totalLessons = course.chaptersList.reduce((acc, chapter) => acc + chapter.lessons.length, 0);
+    const newCompletedLessons = new Set(completedLessons).add(lessonId);
+    if (newCompletedLessons.size === totalLessons) {
+      setCourseCompleted(true);
+      onTokenReward(
+        course.totalTokenReward * 0.1,
+        `Course completed: ${course.title}`,
+        course.id
         );
     }
   };
 
-  return (
-    <div className="page-container">
-      <div className="container">
-        <div className="course-header">
-          <button className="back-btn" onClick={onBack}>
-            ← Back to Courses
-          </button>
-          <h1 className="course-title">{course.title}</h1>
-          <p className="course-description">{course.description}</p>
-          
-          <div className="course-overview">
-            <div className="overview-item">
-              <span className="overview-label">Level:</span>
-              <span className="overview-value">{course.level}</span>
-            </div>
-            <div className="overview-item">
-              <span className="overview-label">Duration:</span>
-              <span className="overview-value">{course.duration}</span>
-            </div>
-            <div className="overview-item">
-              <span className="overview-label">Chapters:</span>
-              <span className="overview-value">{course.chapters}</span>
-            </div>
-            <div className="overview-item">
-              <span className="overview-label">Progress:</span>
-              <span className="overview-value">{getProgressPercentage()}%</span>
-            </div>
-          </div>
+  const getProgressPercentage = () => {
+    const totalLessons = course.chaptersList.reduce((acc, chapter) => acc + chapter.lessons.length, 0);
+    return Math.round((completedLessons.size / totalLessons) * 100);
+  };
 
+  // Hero section
+  const HeroSection = () => (
+    <div className="course-hero">
+      <div className="course-hero-icon">{course.image}</div>
+      <div className="course-hero-content">
+        <h1 className="course-hero-title">{course.title}</h1>
+        <p className="course-hero-desc">{course.description}</p>
+        <div className="course-hero-meta">
+          <span>Level: <b>{course.level}</b></span>
+          <span>Duration: <b>{course.duration}</b></span>
+          <span>Chapters: <b>{course.chapters}</b></span>
+          <span>🪙 <b>{course.totalTokenReward} Tokens</b></span>
+            </div>
+        <div className="course-hero-skills">
+          <span>Skills:</span>
+          {course.skills.map((skill, i) => <span key={i} className="skill-tag">{skill}</span>)}
+            </div>
+        {course.prerequisites && course.prerequisites.length > 0 && (
+          <div className="course-hero-prereq">
+            <span>Prerequisites:</span>
+            {course.prerequisites.map((pr, i) => <span key={i} className="prerequisite-item">{pr}</span>)}
+            </div>
+        )}
+            </div>
+      <button className="back-btn" onClick={onBack}>← Back to Courses</button>
+          </div>
+  );
+
+  // Sidebar
+  const Sidebar = () => (
+    <div className="course-sidebar">
+      <div className="sidebar-section">
+        <h4>Progress</h4>
           <div className="progress-bar-large">
             <div className="progress-fill-large" style={{ width: `${getProgressPercentage()}%` }}></div>
           </div>
-
-          {courseCompleted && (
-            <div className="course-completion-banner">
-              <h3>🎉 Congratulations! You've completed this course!</h3>
-              <button 
-                className="view-certificate-btn"
-                onClick={() => setShowCertificate(true)}
-              >
-                View Certificate
-              </button>
+        <div className="progress-label">{getProgressPercentage()}% Complete</div>
             </div>
-          )}
+      <div className="sidebar-section">
+        <h4>Chapters</h4>
+        <ul className="sidebar-chapters-list">
+          {course.chaptersList.map(chapter => (
+            <li key={chapter.id} className={selectedChapter === chapter.id ? 'active' : ''} onClick={() => {
+              setSelectedChapter(chapter.id);
+              setSelectedLesson(chapter.lessons[0]);
+            }}>
+              {chapter.title}
+            </li>
+          ))}
+        </ul>
         </div>
-
-        <div className="course-tabs">
-          <button 
-            className={`course-tab ${activeTab === 'lessons' ? 'active' : ''}`}
-            onClick={() => setActiveTab('lessons')}
-          >
-            Lessons
-          </button>
-          <button 
-            className={`course-tab ${activeTab === 'forum' ? 'active' : ''}`}
-            onClick={() => setActiveTab('forum')}
-          >
-            Discussion Forum
-          </button>
-          {courseCompleted && (
-            <button 
-              className={`course-tab ${activeTab === 'certificate' ? 'active' : ''}`}
-              onClick={() => setActiveTab('certificate')}
-            >
-              Certificate
-            </button>
-          )}
-        </div>
-
-        {activeTab === 'lessons' && (
-          <div className="course-content-grid">
-            <div className="chapters-sidebar">
-              <h3>Course Chapters</h3>
-              {course.chaptersList.map((chapter: any) => (
-                <div 
-                  key={chapter.id} 
-                  className={`chapter-item ${selectedChapter === chapter.id ? 'active' : ''}`}
-                  onClick={() => setSelectedChapter(chapter.id)}
-                >
-                  <div className="chapter-header">
-                    <span className="chapter-title">{chapter.title}</span>
-                    <span className="chapter-lessons">{chapter.lessons.length} lessons</span>
-                  </div>
-                  <div className="chapter-progress">
-                    <div className="chapter-progress-bar">
-                      <div 
-                        className="chapter-progress-fill" 
-                        style={{ 
-                          width: `${Math.round((chapter.lessons.filter((l: any) => completedLessons.has(l.id)).length / chapter.lessons.length) * 100)}%` 
-                        }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              ))}
+      <div className="sidebar-section">
+        <h4>Lessons</h4>
+        <ul className="sidebar-lessons-list">
+          {selectedChapter && course.chaptersList.find(c => c.id === selectedChapter)?.lessons.map(lesson => (
+            <li key={lesson.id} className={selectedLesson?.id === lesson.id ? 'active' : ''} onClick={() => setSelectedLesson(lesson)}>
+              {lesson.title} {completedLessons.has(lesson.id) && <span className="lesson-completed">✓</span>}
+            </li>
+          ))}
+        </ul>
             </div>
+    </div>
+  );
 
-            <div className="lessons-content">
-              {selectedChapter ? (
-                <div className="lessons-container">
-                  <h3>{course.chaptersList.find((c: any) => c.id === selectedChapter)?.title}</h3>
-                  <div className="lessons-list">
-                    {course.chaptersList.find((c: any) => c.id === selectedChapter)?.lessons.map((lesson: any) => (
-                      <div key={lesson.id} className={`lesson-item ${completedLessons.has(lesson.id) ? 'completed' : ''} ${selectedLesson?.id === lesson.id ? 'selected' : ''}`}>
-                        <div className="lesson-info" onClick={() => setSelectedLesson(lesson)}>
-                          <div className="lesson-icon">
-                            {lesson.type === 'video' && '🎥'}
-                            {lesson.type === 'quiz' && '📝'}
-                            {lesson.type === 'exercise' && '💻'}
-                            {lesson.type === 'lab' && '🔬'}
+  // Main lesson/video/content area
+  const LessonContent = () => (
+    <div className="lesson-main-content">
+      {selectedLesson ? (
+        <div className="lesson-main-card">
+          {selectedLesson.type === 'video' && (
+            <div className="lesson-video-preview">
+              <VideoPlayer 
+                videoUrl={selectedLesson.videoUrl || "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4"}
+                onComplete={() => handleLessonComplete(selectedLesson.id)}
+              />
                           </div>
-                          <div className="lesson-details">
-                            <h4>{lesson.title}</h4>
-                            <span className="lesson-duration">{lesson.duration}</span>
-                            {quizScores[lesson.id] && (
-                              <span className="quiz-score">Score: {quizScores[lesson.id]}%</span>
-                            )}
+          )}
+          <div className="lesson-details">
+            <h2>{selectedLesson.title}</h2>
+            <div className="lesson-meta">
+              <span>{selectedLesson.duration}</span>
+              <span className={`lesson-difficulty ${selectedLesson.difficulty}`}>{selectedLesson.difficulty}</span>
+              <span className="lesson-tokens"><span className="token-icon">🪙</span>{selectedLesson.tokenReward} Tokens</span>
                           </div>
+            {selectedLesson.type === 'reading' && (
+              <div className="lesson-content reading-lesson">
+                <pre className="content-text">{selectedLesson.content}</pre>
+                <button className="complete-lesson-btn" onClick={() => handleLessonComplete(selectedLesson.id)}>Mark as Complete</button>
                         </div>
-                        <div className="lesson-actions">
-                          {completedLessons.has(lesson.id) ? (
-                            <span className="completed-badge">✓ Completed</span>
-                          ) : (
-                            <button 
-                              className="start-lesson-btn"
-                              onClick={() => setSelectedLesson(lesson)}
-                            >
-                              Start Lesson
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  {selectedLesson && (
-                    <div className="lesson-viewer">
-                      <div className="lesson-viewer-header">
-                        <h4>{selectedLesson.title}</h4>
-                        <button 
-                          className="close-lesson-btn"
-                          onClick={() => setSelectedLesson(null)}
-                        >
-                          ×
-                        </button>
-                      </div>
-                      <div className="lesson-viewer-content">
-                        {renderLessonContent()}
-                      </div>
+            )}
+            {(selectedLesson.type === 'exercise' || selectedLesson.type === 'lab') && (
+              <div className="lesson-content practical-lesson">
+                <pre className="content-text">{selectedLesson.content}</pre>
+                <button className="complete-lesson-btn" onClick={() => handleLessonComplete(selectedLesson.id)}>Mark as Complete</button>
                     </div>
                   )}
-                </div>
-              ) : (
-                <div className="select-chapter">
-                  <h3>Select a Chapter</h3>
-                  <p>Choose a chapter from the sidebar to start learning</p>
-                </div>
+            {selectedLesson.type === 'quiz' && (
+              <Quiz 
+                quiz={selectedLesson.quiz}
+                onComplete={(score) => handleQuizComplete(selectedLesson.id, score)}
+              />
               )}
             </div>
           </div>
-        )}
-
-        {activeTab === 'forum' && (
-          <div className="forum-container">
-            <DiscussionForum courseId={course.id} />
+      ) : (
+        <div className="lesson-main-card empty">
+          <h3>Select a lesson to begin</h3>
           </div>
         )}
-
-        {activeTab === 'certificate' && courseCompleted && (
-          <div className="certificate-container">
-            <Certificate 
-              course={course}
-              userName="John Doe"
-              completionDate={new Date().toLocaleDateString()}
-            />
           </div>
-        )}
-      </div>
+  );
 
-      {showCertificate && (
-        <div className="certificate-modal">
-          <div className="certificate-modal-content">
-            <button 
-              className="close-certificate-btn"
-              onClick={() => setShowCertificate(false)}
-            >
-              ×
-            </button>
-            <Certificate 
-              course={course}
-              userName="John Doe"
-              completionDate={new Date().toLocaleDateString()}
-            />
+  return (
+    <div className="course-detail-page">
+      <TokenChestModal open={showChest} amount={chestAmount} onClose={() => setShowChest(false)} />
+      <HeroSection />
+      <div className="course-detail-body">
+        <Sidebar />
+        <LessonContent />
           </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -1265,7 +1796,10 @@ const ResourcesPage: React.FC = () => {
 };
 
 // Profile Page Component
-const ProfilePage: React.FC = () => {
+const ProfilePage: React.FC<ProfilePageProps> = ({ userTokens }) => {
+  const { isAuthenticated, loading } = useICPAuth();
+  if (loading) return <div>Loading...</div>;
+  if (!isAuthenticated) return <div style={{textAlign: 'center', marginTop: '2rem'}}>Please log in with Internet Identity to view your profile.</div>;
   const [profile, setProfile] = useState({
     name: "John Doe",
     email: "john.doe@example.com",
@@ -1276,11 +1810,9 @@ const ProfilePage: React.FC = () => {
     github: "johndoe",
     linkedin: "johndoe"
   });
-
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
   const [profilePicture, setProfilePicture] = useState<string | null>(null);
-
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1291,167 +1823,76 @@ const ProfilePage: React.FC = () => {
       reader.readAsDataURL(file);
     }
   };
-
   const handleSave = () => {
     setProfile(editedProfile);
     setIsEditing(false);
   };
-
   const handleCancel = () => {
     setEditedProfile(profile);
     setIsEditing(false);
   };
-
   return (
-    <div className="page-container">
-      <div className="container">
-        <h1 className="page-title">Profile</h1>
-        
-        <div className="profile-container">
-          <div className="profile-header">
-            <div className="profile-avatar">
-              {profilePicture ? (
-                <img src={profilePicture} alt="Profile" className="avatar-image" />
-              ) : (
-                <div className="avatar-placeholder">👤</div>
-              )}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleFileChange}
-                className="avatar-upload"
-                id="avatar-upload"
-              />
-              <label htmlFor="avatar-upload" className="avatar-upload-label">
-                📷
-              </label>
-            </div>
-            
-            <div className="profile-info">
-              <h2>{profile.name}</h2>
-              <p className="profile-email">{profile.email}</p>
-              <p className="profile-bio">{profile.bio}</p>
-            </div>
-            
-            <button 
-              className="edit-profile-btn"
-              onClick={() => setIsEditing(!isEditing)}
-            >
-              {isEditing ? 'Cancel' : 'Edit Profile'}
-            </button>
-          </div>
-
-          {isEditing ? (
-            <div className="profile-form">
-              <div className="form-group">
-                <label>Name</label>
-                <input
-                  type="text"
-                  value={editedProfile.name}
-                  onChange={(e) => setEditedProfile(prev => ({ ...prev, name: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Email</label>
-                <input
-                  type="email"
-                  value={editedProfile.email}
-                  onChange={(e) => setEditedProfile(prev => ({ ...prev, email: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Bio</label>
-                <textarea
-                  value={editedProfile.bio}
-                  onChange={(e) => setEditedProfile(prev => ({ ...prev, bio: e.target.value }))}
-                  rows={3}
-                />
-              </div>
-              <div className="form-group">
-                <label>Location</label>
-                <input
-                  type="text"
-                  value={editedProfile.location}
-                  onChange={(e) => setEditedProfile(prev => ({ ...prev, location: e.target.value }))}
-                />
-              </div>
-              <div className="form-group">
-                <label>Website</label>
-                <input
-                  type="url"
-                  value={editedProfile.website}
-                  onChange={(e) => setEditedProfile(prev => ({ ...prev, website: e.target.value }))}
-                />
-              </div>
-              <div className="social-links">
-                <div className="form-group">
-                  <label>Twitter</label>
-                  <input
-                    type="text"
-                    value={editedProfile.twitter}
-                    onChange={(e) => setEditedProfile(prev => ({ ...prev, twitter: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>GitHub</label>
-                  <input
-                    type="text"
-                    value={editedProfile.github}
-                    onChange={(e) => setEditedProfile(prev => ({ ...prev, github: e.target.value }))}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>LinkedIn</label>
-                  <input
-                    type="text"
-                    value={editedProfile.linkedin}
-                    onChange={(e) => setEditedProfile(prev => ({ ...prev, linkedin: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="form-actions">
-                <button className="save-btn" onClick={handleSave}>Save Changes</button>
-                <button className="cancel-btn" onClick={handleCancel}>Cancel</button>
-              </div>
-            </div>
+    <div className="profile-container">
+      <div className="profile-header">
+        <div className="profile-avatar">
+          {profilePicture ? (
+            <img src={profilePicture} alt="Profile" className="avatar-image" />
           ) : (
-            <div className="profile-details">
-              <div className="detail-section">
-                <h3>Personal Information</h3>
-                <div className="detail-item">
-                  <span className="detail-label">Location:</span>
-                  <span className="detail-value">{profile.location}</span>
-                </div>
-                <div className="detail-item">
-                  <span className="detail-label">Website:</span>
-                  <span className="detail-value">
-                    <a href={profile.website} target="_blank" rel="noopener noreferrer">
-                      {profile.website}
-                    </a>
-                  </span>
-                </div>
-              </div>
-              
-              <div className="detail-section">
-                <h3>Social Links</h3>
-                <div className="social-links-display">
-                  <a href={`https://twitter.com/${profile.twitter}`} target="_blank" rel="noopener noreferrer" className="social-link">
-                    <span className="social-icon">🐦</span>
-                    <span>Twitter</span>
-                  </a>
-                  <a href={`https://github.com/${profile.github}`} target="_blank" rel="noopener noreferrer" className="social-link">
-                    <span className="social-icon">📦</span>
-                    <span>GitHub</span>
-                  </a>
-                  <a href={`https://linkedin.com/in/${profile.linkedin}`} target="_blank" rel="noopener noreferrer" className="social-link">
-                    <span className="social-icon">💼</span>
-                    <span>LinkedIn</span>
-                  </a>
-                </div>
-              </div>
-            </div>
+            <div className="avatar-placeholder">👤</div>
           )}
+          <label className="avatar-upload-label">
+            <input type="file" accept="image/*" onChange={handleFileChange} className="avatar-upload" />
+            Change
+          </label>
         </div>
+        <div className="profile-info">
+          <h2>{profile.name}</h2>
+          <div className="profile-email">{profile.email}</div>
+          <div className="profile-bio">{profile.bio}</div>
+        </div>
+      </div>
+      <div className="profile-token-balance">
+        <span className="profile-token-icon">🪙</span>
+        <span className="profile-token-amount">{userTokens} Tokens</span>
+      </div>
+      <div className="profile-details">
+        <div className="detail-section">
+          <h3>Personal Information</h3>
+          <div className="detail-item">
+            <span className="detail-label">Location:</span>
+            <span className="detail-value">{profile.location}</span>
+          </div>
+          <div className="detail-item">
+            <span className="detail-label">Website:</span>
+            <span className="detail-value">
+              <a href={profile.website} target="_blank" rel="noopener noreferrer">
+                {profile.website}
+              </a>
+            </span>
+          </div>
+        </div>
+        
+        <div className="detail-section">
+          <h3>Social Links</h3>
+          <div className="social-links-display">
+            <a href={`https://twitter.com/${profile.twitter}`} target="_blank" rel="noopener noreferrer" className="social-link">
+              <span className="social-icon">🐦</span>
+              <span>Twitter</span>
+            </a>
+            <a href={`https://github.com/${profile.github}`} target="_blank" rel="noopener noreferrer" className="social-link">
+              <span className="social-icon">📦</span>
+              <span>GitHub</span>
+            </a>
+            <a href={`https://linkedin.com/in/${profile.linkedin}`} target="_blank" rel="noopener noreferrer" className="social-link">
+              <span className="social-icon">💼</span>
+              <span>LinkedIn</span>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div className="form-actions">
+        <button className="save-btn" onClick={handleSave}>Save Changes</button>
+        <button className="cancel-btn" onClick={handleCancel}>Cancel</button>
       </div>
     </div>
   );
@@ -1459,6 +1900,9 @@ const ProfilePage: React.FC = () => {
 
 // Admin Panel Component
 const AdminPanel: React.FC = () => {
+  const { isAuthenticated, loading } = useICPAuth();
+  if (loading) return <div>Loading...</div>;
+  if (!isAuthenticated) return <div style={{textAlign: 'center', marginTop: '2rem'}}>Admin access requires Internet Identity login.</div>;
   const [activeTab, setActiveTab] = useState('courses');
   const [courses, setCourses] = useState([
     { id: 1, title: "Blockchain Fundamentals", status: "published", students: 1250 },
@@ -1652,6 +2096,7 @@ const VideoUpload: React.FC<{ onUploadComplete: (videoUrl: string) => void }> = 
   const [videoTitle, setVideoTitle] = useState('');
   const [videoDescription, setVideoDescription] = useState('');
   const [selectedCourse, setSelectedCourse] = useState('');
+  const { principal } = useICPAuth();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1677,6 +2122,9 @@ const VideoUpload: React.FC<{ onUploadComplete: (videoUrl: string) => void }> = 
 
       const response = await fetch('http://localhost:3001/api/upload-video', {
         method: 'POST',
+        headers: {
+          ...(principal ? { 'X-Principal': principal } : {}),
+        },
         body: formData
       });
 
@@ -1818,11 +2266,16 @@ const VideoManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showUpload, setShowUpload] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<any>(null);
+  const { principal } = useICPAuth();
 
   // Fetch videos from backend
   const fetchVideos = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/videos');
+      const response = await fetch('http://localhost:3001/api/videos', {
+        headers: {
+          ...(principal ? { 'X-Principal': principal } : {}),
+        },
+      });
       const result = await response.json();
       
       if (result.success) {
@@ -1852,7 +2305,10 @@ const VideoManagement: React.FC = () => {
     if (confirm('Are you sure you want to delete this video?')) {
       try {
         const response = await fetch(`http://localhost:3001/api/videos/${videoId}`, {
-          method: 'DELETE'
+          method: 'DELETE',
+          headers: {
+            ...(principal ? { 'X-Principal': principal } : {}),
+          },
         });
         
         const result = await response.json();
@@ -1875,7 +2331,8 @@ const VideoManagement: React.FC = () => {
       const response = await fetch(`http://localhost:3001/api/videos/${videoId}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...(principal ? { 'X-Principal': principal } : {}),
         },
         body: JSON.stringify(updates)
       });
@@ -2033,22 +2490,152 @@ const VideoManagement: React.FC = () => {
   );
 };
 
+// Token Store Component
+const TokenStore: React.FC<{ 
+  userTokens: number; 
+  onRedeem: (item: SwagItem) => void; 
+  onClose: () => void;
+  swagItems: SwagItem[];
+}> = ({ userTokens, onRedeem, onClose, swagItems }) => {
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  const filteredItems = selectedCategory === 'all' 
+    ? swagItems 
+    : swagItems.filter(item => item.category === selectedCategory);
+
+  return (
+    <div className="token-store-overlay">
+      <div className="token-store-modal">
+        <div className="token-store-header">
+          <h2>🛍️ Token Store</h2>
+          <div className="token-balance">
+            <span className="token-icon">🪙</span>
+            <span className="token-amount">{userTokens} Tokens</span>
+          </div>
+          <button className="close-btn" onClick={onClose}>×</button>
+        </div>
+
+        <div className="token-store-categories">
+          <button 
+            className={`category-btn ${selectedCategory === 'all' ? 'active' : ''}`}
+            onClick={() => setSelectedCategory('all')}
+          >
+            All Items
+          </button>
+          <button 
+            className={`category-btn ${selectedCategory === 'clothing' ? 'active' : ''}`}
+            onClick={() => setSelectedCategory('clothing')}
+          >
+            👕 Clothing
+          </button>
+          <button 
+            className={`category-btn ${selectedCategory === 'accessories' ? 'active' : ''}`}
+            onClick={() => setSelectedCategory('accessories')}
+          >
+            🎒 Accessories
+          </button>
+          <button 
+            className={`category-btn ${selectedCategory === 'tech' ? 'active' : ''}`}
+            onClick={() => setSelectedCategory('tech')}
+          >
+            💻 Tech
+          </button>
+          <button 
+            className={`category-btn ${selectedCategory === 'collectibles' ? 'active' : ''}`}
+            onClick={() => setSelectedCategory('collectibles')}
+          >
+            🏷️ Collectibles
+          </button>
+        </div>
+
+        <div className="swag-items-grid">
+          {filteredItems.map(item => (
+            <div key={item.id} className="swag-item-card">
+              <div className="swag-item-image">
+                <span className="item-icon">{item.image}</span>
+              </div>
+              <div className="swag-item-content">
+                <h3>{item.name}</h3>
+                <p>{item.description}</p>
+                <div className="swag-item-meta">
+                  <span className="token-cost">
+                    <span className="token-icon">🪙</span>
+                    {item.tokenCost} Tokens
+                  </span>
+                  <span className={`availability ${item.available ? 'available' : 'unavailable'}`}>
+                    {item.available ? 'In Stock' : 'Out of Stock'}
+                  </span>
+                </div>
+                <button 
+                  className={`redeem-btn ${userTokens >= item.tokenCost && item.available ? 'enabled' : 'disabled'}`}
+                  onClick={() => onRedeem(item)}
+                  disabled={userTokens < item.tokenCost || !item.available}
+                >
+                  {userTokens >= item.tokenCost ? 'Redeem' : 'Not Enough Tokens'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Token History Component
+const TokenHistory: React.FC<{ 
+  tokenHistory: TokenReward[]; 
+  onClose: () => void;
+}> = ({ tokenHistory, onClose }) => {
+  return (
+    <div className="token-history-overlay">
+      <div className="token-history-modal">
+        <div className="token-history-header">
+          <h2>🪙 Token History</h2>
+          <button className="close-btn" onClick={onClose}>×</button>
+        </div>
+        
+        <div className="token-history-list">
+          {tokenHistory.length === 0 ? (
+            <div className="empty-history">
+              <p>No tokens earned yet. Start learning to earn tokens!</p>
+            </div>
+          ) : (
+            tokenHistory.map(reward => (
+              <div key={reward.id} className="token-reward-item">
+                <div className="reward-info">
+                  <span className="reward-amount">+{reward.amount} 🪙</span>
+                  <span className="reward-reason">{reward.reason}</span>
+                </div>
+                <span className="reward-date">{reward.date}</span>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Main App Component
 const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState('home');
+  const [userTokens, setUserTokens] = useState(0);
+  const [tokenHistory, setTokenHistory] = useState<TokenReward[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState<number | null>(null);
 
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
         return <LandingPage />;
       case 'courses':
-        return <CoursesPage />;
+        return <CoursesPage userTokens={userTokens} setUserTokens={setUserTokens} tokenHistory={tokenHistory} setTokenHistory={setTokenHistory} selectedCourse={selectedCourse} setSelectedCourse={setSelectedCourse} />;
       case 'hackathons':
         return <HackathonsPage />;
       case 'resources':
         return <ResourcesPage />;
       case 'profile':
-        return <ProfilePage />;
+        return <ProfilePage userTokens={userTokens} />;
       case 'admin':
         return <AdminPanel />;
       default:
@@ -2057,45 +2644,19 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="app">
-      <Navigation currentPage={currentPage} setCurrentPage={setCurrentPage} />
-      {renderPage()}
-      
-      {/* Footer - only show on home page */}
-      {currentPage === 'home' && (
-        <footer className="footer">
-          <div className="container">
-            <div className="footer-content">
-              <div className="footer-section">
-                <h3>BlockseBlock</h3>
-                <p>Empowering the future of blockchain education</p>
-              </div>
-              <div className="footer-section">
-                <h4>Quick Links</h4>
-                <ul>
-                  <li><a href="#courses">Courses</a></li>
-                  <li><a href="#hackathons">Hackathons</a></li>
-                  <li><a href="#resources">Resources</a></li>
-                  <li><a href="#profile">Profile</a></li>
-                </ul>
-              </div>
-              <div className="footer-section">
-                <h4>Connect</h4>
-                <ul>
-                  <li><a href="#twitter">Twitter</a></li>
-                  <li><a href="#discord">Discord</a></li>
-                  <li><a href="#github">GitHub</a></li>
-                  <li><a href="#linkedin">LinkedIn</a></li>
-                </ul>
-              </div>
-            </div>
-            <div className="footer-bottom">
-              <p>&copy; 2025 BlockseBlock. All rights reserved.</p>
-            </div>
-          </div>
-        </footer>
-      )}
-    </div>
+    <ICPAuthProvider>
+      <div className="app">
+        <Navigation currentPage={currentPage} setCurrentPage={setCurrentPage} />
+        {renderPage()}
+        
+        {/* Footer - only show on home page */}
+        {currentPage === 'home' && (
+          <footer className="footer">
+            <div className="footer-content">BlockseBlock © 2023</div>
+          </footer>
+        )}
+      </div>
+    </ICPAuthProvider>
   );
 };
 
